@@ -1,0 +1,7 @@
+{
+    "host": "127.0.0.1",
+    "port": "8989",
+    "mystem_path": "mystem.exe",
+    "mystem_workers": "1",
+    "response_workers": "1"
+}
