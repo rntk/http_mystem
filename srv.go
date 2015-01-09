@@ -116,12 +116,6 @@ func main() {
             log.Fatal(msg)
             panic(msg)
         }
-        /*response_workers, err := strconv.ParseUint(config["response_workers"], 10, 8)
-        if err != nil {
-            msg = fmt.Sprintf("Can't get response_workers: %v", err)
-            log.Fatal(msg)
-            panic(msg)
-        }*/
         _, err = os.Open(config["mystem_path"])
         if  err != nil {
             msg = fmt.Sprintf("Can't find mystem: %v", err)
@@ -132,9 +126,6 @@ func main() {
         for i = 0; i < mystem_workers; i++ {
             go workerMystem(for_process, for_response, config["mystem_path"])
         }
-        /*for i = 0; i < response_workers; i++ {
-            go workerResponse(for_response)
-        }*/
         http.HandleFunc("/", processRequest)
         log.Print(fmt.Sprintf("Server start on: %v:%v", config["host"], config["port"]))
         err = http.ListenAndServe(fmt.Sprintf("%v:%v", config["host"], config["port"]), nil)
