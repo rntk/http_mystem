@@ -14,8 +14,6 @@ import (
 
 type Data struct {
     word string
-    answer string
-    resp http.ResponseWriter
     channel chan string
 }
 
@@ -50,6 +48,7 @@ func workerMystem(for_process chan Data, for_response chan Data, mystem_path str
     mystem_reader, err_r := mystem.StdoutPipe()
     err := mystem.Start()
     var msg string
+    var answer string
     if (err_w != nil) || (err_r != nil) {
         msg := fmt.Sprintf("Can't start: \n%v\n%v", err_w, err_r)
         log.Fatal(msg)
@@ -76,56 +75,30 @@ func workerMystem(for_process chan Data, for_response chan Data, mystem_path str
                 log.Fatal(msg)
                 panic(msg)
             }
-            data.answer = string(buf[:n - 1])
-            time.Sleep(time.Second * time.Duration(rand.Intn(5)))
-            //for_response <- data
-            data.channel <- data.answer
+            answer = string(buf[:n - 1])
+            //time.Sleep(time.Second * time.Duration(rand.Intn(5)))
+            data.channel <- answer
             time.Sleep(time.Millisecond * 100)
         }
     }
     return 0
 }
 
-/*func workerResponse(channel chan Data) int {
-    var data Data
-    name := rand.Int()
-    log.Print("Responser started ", name)
-    data = <- channel
-    n, err := resp.Write([]byte(data.answer))
-    if err != nil {
-        log.Print(n, err)
-        resp.WriteHeader(500)
-    }
-    log.Print("Responser done", name)
-    for {
-        data = <- channel
-        n, err := data.resp.Write([]byte(data.answer))
-        if err != nil {
-            log.Print(n, err)
-        }
-        log.Print("answer processor done")
-        time.Sleep(time.Second)
-    }
-    return 0
-}*/
-
 func processRequest(resp http.ResponseWriter, req *http.Request) {
     var data Data
     var local_channel = make(chan string)
     var answer string
     req.ParseForm()
-    if len(req.Form["word"]) > 0 {
+    if (len(req.Form["word"]) > 0)  && (req.Form["word"][0] != ""){
         word := req.Form["word"][0]
         data.word = word
         data.channel = local_channel
-        //data.resp = resp
         for_process <- data
         answer = <- local_channel
         resp.Write([]byte(answer))
     } else {
         resp.Write([]byte("Word can't be empty"))
     }
-    
 }
 
 func main() {
