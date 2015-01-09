@@ -16,6 +16,7 @@ type Data struct {
     word string
     answer string
     resp http.ResponseWriter
+    channel chan string
 }
 
 var for_process = make(chan Data, 10)
@@ -75,37 +76,56 @@ func workerMystem(for_process chan Data, for_response chan Data, mystem_path str
                 log.Fatal(msg)
                 panic(msg)
             }
-            data.answer = string(buf[:n])
-            for_response <- data
+            data.answer = string(buf[:n - 1])
+            time.Sleep(time.Second * time.Duration(rand.Intn(5)))
+            //for_response <- data
+            data.channel <- data.answer
             time.Sleep(time.Millisecond * 100)
         }
     }
     return 0
 }
 
-func workerResponse(channel chan Data) int {
+/*func workerResponse(channel chan Data) int {
     var data Data
     name := rand.Int()
     log.Print("Responser started ", name)
+    data = <- channel
+    n, err := resp.Write([]byte(data.answer))
+    if err != nil {
+        log.Print(n, err)
+        resp.WriteHeader(500)
+    }
+    log.Print("Responser done", name)
     for {
         data = <- channel
-        data.resp.Write([]byte(data.answer))
+        n, err := data.resp.Write([]byte(data.answer))
+        if err != nil {
+            log.Print(n, err)
+        }
+        log.Print("answer processor done")
         time.Sleep(time.Second)
     }
     return 0
-}
+}*/
 
 func processRequest(resp http.ResponseWriter, req *http.Request) {
     var data Data
+    var local_channel = make(chan string)
+    var answer string
     req.ParseForm()
     if len(req.Form["word"]) > 0 {
         word := req.Form["word"][0]
         data.word = word
-        data.resp = resp
+        data.channel = local_channel
+        //data.resp = resp
         for_process <- data
+        answer = <- local_channel
+        resp.Write([]byte(answer))
     } else {
         resp.Write([]byte("Word can't be empty"))
     }
+    
 }
 
 func main() {
@@ -117,18 +137,18 @@ func main() {
     } else {
         log.Print("Config load succesful")
         mystem_workers, err := strconv.ParseUint(config["mystem_workers"], 10, 8)
-        response_workers, err := strconv.ParseUint(config["response_workers"], 10, 8)
         msg := ""
         if err != nil {
             msg = fmt.Sprintf("Can't get mystem_workers: %v", err)
             log.Fatal(msg)
             panic(msg)
         }
+        /*response_workers, err := strconv.ParseUint(config["response_workers"], 10, 8)
         if err != nil {
             msg = fmt.Sprintf("Can't get response_workers: %v", err)
             log.Fatal(msg)
             panic(msg)
-        }
+        }*/
         _, err = os.Open(config["mystem_path"])
         if  err != nil {
             msg = fmt.Sprintf("Can't find mystem: %v", err)
@@ -139,15 +159,14 @@ func main() {
         for i = 0; i < mystem_workers; i++ {
             go workerMystem(for_process, for_response, config["mystem_path"])
         }
-        for i = 0; i < response_workers; i++ {
+        /*for i = 0; i < response_workers; i++ {
             go workerResponse(for_response)
-        }
+        }*/
         http.HandleFunc("/", processRequest)
+        log.Print(fmt.Sprintf("Server start on: %v:%v", config["host"], config["port"]))
         err = http.ListenAndServe(fmt.Sprintf("%v:%v", config["host"], config["port"]), nil)
         if err != nil {
             log.Print("Can't start http server: ", err)
-        } else {
-            log.Print(fmt.Sprintf("Server start on: %v:%v", config["host"], config["port"]))
         }
     }
 }
