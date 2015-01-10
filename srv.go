@@ -9,7 +9,7 @@ import (
     "log"
     "time"
     "strconv"
-    "math/rand"
+    //"math/rand"
 )
 
 type Data struct {
@@ -17,8 +17,12 @@ type Data struct {
     channel chan string
 }
 
-var for_process = make(chan Data, 10)
-var for_response = make(chan Data, 10)
+var for_process chan Data = make(chan Data, 10)
+
+func makePanic(msg string) {
+    log.Fatal(msg)
+    panic(msg)    
+}
 
 func loadConfig() (config map[string]string, err error) {
     var f_name string = "conf.json"
@@ -38,26 +42,21 @@ func loadConfig() (config map[string]string, err error) {
     return config, err
 }
 
-func workerMystem(for_process chan Data, for_response chan Data, mystem_path string) int {
+func workerMystem(for_process chan Data, mystem_path string) int {
     var data Data
     var buf []byte
-    name := rand.Int()
-    log.Print("Mystem started ", name)
+    //name := rand.Int()
+    //log.Print("Mystem started ", name)
     mystem := exec.Command(mystem_path, "-n")
     mystem_writer, err_w := mystem.StdinPipe()
     mystem_reader, err_r := mystem.StdoutPipe()
     err := mystem.Start()
-    var msg string
     var answer string
     if (err_w != nil) || (err_r != nil) {
-        msg := fmt.Sprintf("Can't start: \n%v\n%v", err_w, err_r)
-        log.Fatal(msg)
-        panic(msg)
+        makePanic(fmt.Sprintf("Can't start: \n%v\n%v", err_w, err_r))
     }
     if err != nil {
-        msg = fmt.Sprintf("Can't start: %v", err)
-        log.Fatal(msg)
-        panic(msg)
+        makePanic(fmt.Sprintf("Can't start: %v", err))
     } else {
         var n int
         for {
@@ -65,15 +64,11 @@ func workerMystem(for_process chan Data, for_response chan Data, mystem_path str
             buf = make([]byte, 1000)
             n, err = mystem_writer.Write([]byte(fmt.Sprintf("%v\n", data.word)))
             if err != nil {
-                msg = fmt.Sprintf("Can't send word to mystem: %v", err)
-                log.Fatal(msg)
-                panic(msg)
+                makePanic(fmt.Sprintf("Can't send word to mystem: %v", err))
             }
             n, err = mystem_reader.Read(buf)
             if err != nil {
-                msg = fmt.Sprintf("Can't read answer from mystem: %v", err)
-                log.Fatal(msg)
-                panic(msg)
+                makePanic(fmt.Sprintf("Can't read answer from mystem: %v", err))
             }
             answer = string(buf[:n - 1])
             //time.Sleep(time.Second * time.Duration(rand.Intn(5)))
@@ -84,13 +79,13 @@ func workerMystem(for_process chan Data, for_response chan Data, mystem_path str
     return 0
 }
 
-func processRequest(resp http.ResponseWriter, req *http.Request) {
+func processWords(resp http.ResponseWriter, req *http.Request) {
     var data Data
     var local_channel = make(chan string)
     var answer string
     req.ParseForm()
-    if (len(req.Form["word"]) > 0)  && (req.Form["word"][0] != ""){
-        word := req.Form["word"][0]
+    if (len(req.Form["words"]) > 0)  && (req.Form["words"][0] != ""){
+        word := req.Form["words"][0]
         data.word = word
         data.channel = local_channel
         for_process <- data
@@ -104,33 +99,43 @@ func processRequest(resp http.ResponseWriter, req *http.Request) {
 func main() {
     config, err := loadConfig()
     if err != nil {
-        msg := fmt.Sprintf("Can't load config: %v", err)
-        log.Fatal(msg)
-        panic(msg)
+        makePanic(fmt.Sprintf("Can't load config: %v", err))
     } else {
-        log.Print("Config load succesful")
         mystem_workers, err := strconv.ParseUint(config["mystem_workers"], 10, 8)
-        msg := ""
         if err != nil {
-            msg = fmt.Sprintf("Can't get mystem_workers: %v", err)
-            log.Fatal(msg)
-            panic(msg)
+            makePanic(fmt.Sprintf("Can't get mystem_workers: %v", err))
         }
         _, err = os.Open(config["mystem_path"])
         if  err != nil {
-            msg = fmt.Sprintf("Can't find mystem: %v", err)
-            log.Fatal(msg)
-            panic(msg)
+            makePanic(fmt.Sprintf("Can't find mystem: %v", err))
         }
         var i uint64
-        for i = 0; i < mystem_workers; i++ {
-            go workerMystem(for_process, for_response, config["mystem_path"])
+        var buf_size uint64
+        buf_size, err = strconv.ParseUint(config["channel_buffer"], 10, 64)
+        if err != nil {
+            makePanic(fmt.Sprintf("Can't process channel_buffer: %v", err))
         }
-        http.HandleFunc("/", processRequest)
+        if buf_size > 0 {
+            for_process = make(chan Data, buf_size)
+        } else {
+            for_process = make(chan Data)
+        }
+        log.Print("Config load successful")
+        for i = 0; i < mystem_workers; i++ {
+            go workerMystem(for_process, config["mystem_path"])
+        }
+        http.HandleFunc("/", processWords)
         log.Print(fmt.Sprintf("Server start on: %v:%v", config["host"], config["port"]))
         err = http.ListenAndServe(fmt.Sprintf("%v:%v", config["host"], config["port"]), nil)
         if err != nil {
-            log.Print("Can't start http server: ", err)
+            makePanic(fmt.Sprintf("Can't start http server: %v", err))
         }
     }
 }
+
+/*TODO
+url /word for one word
+url /words for many words (word1,word2, ..., wordN)
+web ui
+mystem options from conf.json
+*/
