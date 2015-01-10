@@ -2,5 +2,6 @@
     "host": "127.0.0.1",
     "port": "8989",
     "mystem_path": "mystem.exe",
-    "mystem_workers": "2"
+    "mystem_workers": "2",
+    "channel_buffer": "10"
 }
