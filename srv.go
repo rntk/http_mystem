@@ -9,7 +9,8 @@ import (
     "log"
     "time"
     "strconv"
-    //"math/rand"
+    "strings"
+    "math/rand"
 )
 
 type Data struct {
@@ -17,7 +18,7 @@ type Data struct {
     channel chan string
 }
 
-var for_process chan Data = make(chan Data, 10)
+var for_process chan Data
 
 func makePanic(msg string) {
     log.Fatal(msg)
@@ -43,34 +44,38 @@ func loadConfig() (config map[string]string, err error) {
 }
 
 func workerMystem(for_process chan Data, mystem_path string) int {
-    var data Data
-    var buf []byte
-    //name := rand.Int()
-    //log.Print("Mystem started ", name)
+    name := rand.Int()
+    log.Print("Mystem started ", name)
     mystem := exec.Command(mystem_path, "-n")
     mystem_writer, err_w := mystem.StdinPipe()
     mystem_reader, err_r := mystem.StdoutPipe()
     err := mystem.Start()
-    var answer string
     if (err_w != nil) || (err_r != nil) {
         makePanic(fmt.Sprintf("Can't start: \n%v\n%v", err_w, err_r))
     }
     if err != nil {
         makePanic(fmt.Sprintf("Can't start: %v", err))
     } else {
+        var data Data
+        var buf []byte
         var n int
+        var answer string
         for {
             data = <- for_process
-            buf = make([]byte, 1000)
+            fmt.Printf("Worker %v write %v\n", name, data.word)
             n, err = mystem_writer.Write([]byte(fmt.Sprintf("%v\n", data.word)))
+            fmt.Printf("Worker %v writed %v\n", name, data.word)
             if err != nil {
                 makePanic(fmt.Sprintf("Can't send word to mystem: %v", err))
             }
+            fmt.Printf("Worker %v try read\n", name)
+            buf = make([]byte, 1000)
             n, err = mystem_reader.Read(buf)
             if err != nil {
                 makePanic(fmt.Sprintf("Can't read answer from mystem: %v", err))
             }
-            answer = string(buf[:n - 1])
+            answer = strings.TrimSpace(string(buf[:n]))
+            fmt.Printf("Worker %v say %v\n", name, answer)
             //time.Sleep(time.Second * time.Duration(rand.Intn(5)))
             data.channel <- answer
             time.Sleep(time.Millisecond * 100)
@@ -81,16 +86,26 @@ func workerMystem(for_process chan Data, mystem_path string) int {
 
 func processWords(resp http.ResponseWriter, req *http.Request) {
     var data Data
-    var local_channel = make(chan string)
-    var answer string
+    var answer string = ""
+    var request_answer string = "["
     req.ParseForm()
-    if (len(req.Form["words"]) > 0)  && (req.Form["words"][0] != ""){
-        word := req.Form["words"][0]
-        data.word = word
+    var words_count = len(req.Form["words"])
+    var local_channel = make(chan string, words_count)
+    if words_count > 0 {
         data.channel = local_channel
-        for_process <- data
-        answer = <- local_channel
-        resp.Write([]byte(answer))
+        for _, word := range req.Form["words"] {
+            data.word = word
+            for_process <- data
+        }
+        for i := 0; i < words_count; i++ {
+            answer = <- local_channel
+            if (i + 1) < words_count {
+                answer += ","
+            }
+            request_answer += answer
+        }
+        request_answer += "]"
+        resp.Write([]byte(request_answer))
     } else {
         resp.Write([]byte("Word can't be empty"))
     }
