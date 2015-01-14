@@ -11,6 +11,7 @@ import (
     "strconv"
     "strings"
     "math/rand"
+    "regexp"
 )
 
 type Data struct {
@@ -19,6 +20,7 @@ type Data struct {
 }
 
 var for_process chan Data
+var reg_filter *regexp.Regexp
 
 func makePanic(msg string) {
     log.Fatal(msg)
@@ -46,7 +48,7 @@ func loadConfig() (config map[string]string, err error) {
 func workerMystem(for_process chan Data, mystem_path string) int {
     name := rand.Int()
     log.Print("Mystem started ", name)
-    mystem := exec.Command(mystem_path, "-n")
+    mystem := exec.Command(mystem_path, "-n", "--format", "json")
     mystem_writer, err_w := mystem.StdinPipe()
     mystem_reader, err_r := mystem.StdoutPipe()
     err := mystem.Start()
@@ -62,20 +64,16 @@ func workerMystem(for_process chan Data, mystem_path string) int {
         var answer string
         for {
             data = <- for_process
-            fmt.Printf("Worker %v write %v\n", name, data.word)
             n, err = mystem_writer.Write([]byte(fmt.Sprintf("%v\n", data.word)))
-            fmt.Printf("Worker %v writed %v\n", name, data.word)
             if err != nil {
                 makePanic(fmt.Sprintf("Can't send word to mystem: %v", err))
             }
-            fmt.Printf("Worker %v try read\n", name)
             buf = make([]byte, 1000)
             n, err = mystem_reader.Read(buf)
             if err != nil {
                 makePanic(fmt.Sprintf("Can't read answer from mystem: %v", err))
             }
             answer = strings.TrimSpace(string(buf[:n]))
-            fmt.Printf("Worker %v say %v\n", name, answer)
             //time.Sleep(time.Second * time.Duration(rand.Intn(5)))
             data.channel <- answer
             time.Sleep(time.Millisecond * 100)
@@ -89,15 +87,21 @@ func processWords(resp http.ResponseWriter, req *http.Request) {
     var answer string = ""
     var request_answer string = "["
     req.ParseForm()
-    var words_count = len(req.Form["words"])
+    var words_count = len(req.Form["words[]"])
     var local_channel = make(chan string, words_count)
     if words_count > 0 {
         data.channel = local_channel
-        for _, word := range req.Form["words"] {
-            data.word = word
-            for_process <- data
+        var start int = 0
+        for _, word := range req.Form["words[]"] {
+            if reg_filter.MatchString(word) {
+                data.word = strings.TrimSpace(word)
+                for_process <- data
+            } else {
+                start++
+                request_answer += fmt.Sprintf(`{"analysis":[], "text":"%v"},`, word)
+            }
         }
-        for i := 0; i < words_count; i++ {
+        for i := start; i < words_count; i++ {
             answer = <- local_channel
             if (i + 1) < words_count {
                 answer += ","
@@ -112,10 +116,16 @@ func processWords(resp http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
-    config, err := loadConfig()
+    var err error = nil
+    var config map[string]string
+    config, err = loadConfig()
     if err != nil {
         makePanic(fmt.Sprintf("Can't load config: %v", err))
     } else {
+        reg_filter, err = regexp.Compile(config["reg_filter"])
+        if err != nil {
+            makePanic(fmt.Sprintf("Can`t compile regular expression: %v", err))
+        }
         mystem_workers, err := strconv.ParseUint(config["mystem_workers"], 10, 8)
         if err != nil {
             makePanic(fmt.Sprintf("Can't get mystem_workers: %v", err))
@@ -149,8 +159,5 @@ func main() {
 }
 
 /*TODO
-url /word for one word
-url /words for many words (word1,word2, ..., wordN)
-web ui
 mystem options from conf.json
 */
