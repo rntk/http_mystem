@@ -1,8 +1,10 @@
 {
     "host": "127.0.0.1",
-    "port": "8989",
+    "port": 8989,
+    "reg_filter": "^[-а-яёА-ЯЁ]*$",
     "mystem_path": "mystem/mystem.exe",
-    "mystem_workers": "2",
-    "channel_buffer": "10",
-    "reg_filter": "^[-а-яёА-ЯЁ]*$"
+    "mystem_workers": 80,
+    "channel_buffer": 10,
+    "max_word_length": 50,
+    "max_words": 100
 }
