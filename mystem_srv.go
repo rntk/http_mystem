@@ -5,9 +5,10 @@ import (
     "net/http"
     "os"
     "os/exec"
+    "io"
     "encoding/json"
     "log"
-    "time"
+    //"time"
     "strings"
     //"math/rand"
     "regexp"
@@ -32,6 +33,7 @@ type Config struct {
     Max_word_length int
     Max_words int
     format string
+    max_bytes int
 }
 
 type Answer struct {
@@ -57,15 +59,16 @@ func processMystemOptions(in_opts []string) (out_opts []string, format string, e
     var opts_arr []string
     var approved bool = false
     var exists bool = false
+    var n_exists = false
     for _, opt := range in_opts {
+        approved = false
         opt = strings.TrimSpace(opt)
         if strings.Index(opt, " ") == -1 {
             opts_arr = make([]string, 1)
             opts_arr[0] = opt
-            if opt == "-e" {
-                approved = false
-            } else {
-                approved = true
+            approved = true
+            if opt == "-n" {
+                n_exists = true
             }
         } else {
             opts_arr = make([]string, 2)
@@ -89,6 +92,10 @@ func processMystemOptions(in_opts []string) (out_opts []string, format string, e
             log.Printf("Mystem option '%v' was ignored or replaced by default value. Because wrong or unnecessary", opt)
         }
     }
+    if !n_exists {
+        out_opts = append(out_opts, "-n")
+        log.Print("Added mystem option '-n'. It need for normal work.\n")
+    }
     if format == "" {
         format = DEFAULT_FORMAT
     }
@@ -110,13 +117,59 @@ func loadConfig() (cfg Config, err error) {
             err = json.Unmarshal(raw_json, &cfg)
             if err == nil {
                 cfg.Mystem_options, cfg.format, err = processMystemOptions(cfg.Mystem_options)
+                cfg.max_bytes = cfg.Max_word_length * 2
             }
         }
     }
     return cfg, err
 }
 
-func workerMystem(for_process chan Data, mystem_path string) int {
+func writeStringToPipe(for_write string, pipe io.WriteCloser) (n int, err error) {
+    defer func() {
+        result := recover()
+        if result != nil {
+            log.Fatalf("Recover say: %v", result)
+        }
+    }()    
+    n, err = pipe.Write([]byte(for_write + "\n"))
+    if err != nil {
+        log.Panicf("Can't send word to mystem: %v", err)
+    }
+    return n, err
+}
+
+func readStringFromPipe(for_read *string, pipe io.ReadCloser) (n int, err error) {
+    defer func() {
+        result := recover()
+        if result != nil {
+            log.Fatalf("Recover say: %v", result)
+        }
+    }()
+    buf := make([]byte, config.max_bytes)
+    n, err = pipe.Read(buf)
+    if err == nil {
+        *for_read = strings.TrimSpace(string(buf[:n]))
+    } else {
+        log.Panicf("Can't send word to mystem: %v", err)
+    } 
+    return n, err
+}
+
+func readXMLTrash(number int, pipe io.ReadCloser) {
+    var data string = ""
+    var err error
+    for i := 0; i < number; i++ {
+        for data == "" {
+            _, err = readStringFromPipe(&data, pipe)
+            if err != nil {
+                makePanic(fmt.Sprintf("Can't start: %v", err))
+            }
+        }
+        data = ""
+    }
+}
+
+func workerMystem(for_process chan Data, mystem_path string) {
     //name := rand.Int()
     //log.Print("Mystem started ", name)
     mystem := exec.Command(mystem_path, config.Mystem_options...)
@@ -130,39 +183,48 @@ func workerMystem(for_process chan Data, mystem_path string) int {
         makePanic(fmt.Sprintf("Can't start: %v", err))
     } else {
         var data Data
-        var buf []byte
-        var n int
         var answer Answer
         if config.format == "xml" {
-            n, err = mystem_writer.Write([]byte("test"))
+            readXMLTrash(2, mystem_reader)
+            _, err = writeStringToPipe("тест", mystem_writer)
             if err != nil {
-                makePanic(fmt.Sprintf("Can't send word to mystem: %v", err))
+                panic("")
             }
-            buf = make([]byte, 1000)
-            n, err = mystem_reader.Read(buf)
+            readXMLTrash(2, mystem_reader)
+        } else {
+            _, err = writeStringToPipe("тест", mystem_writer)
             if err != nil {
-                makePanic(fmt.Sprintf("Can't send word to mystem: %v", err))
+                panic("")
             }
+            _, err = readStringFromPipe(&answer.data, mystem_reader)
+            if err != nil {
+                panic("")
+            }            
         }
         for {
             data = <- for_process
-            n, err = mystem_writer.Write([]byte(fmt.Sprintf("%v\n", data.word)))
-            if err != nil {
-                log.Panicf("Can't send word to mystem: %v", err)
-            }
-            buf = make([]byte, 1000)
-            n, err = mystem_reader.Read(buf)
-            if err != nil {
-                log.Panicf("Can't read answer from mystem: %v", err)
-            }
-            answer.data = strings.TrimSpace(string(buf[:n]))
+            _, err = writeStringToPipe(data.word, mystem_writer)
             answer.err = err
-            //time.Sleep(time.Second * time.Duration(rand.Intn(5)))
+            if config.format != "xml" {
+                _, err = readStringFromPipe(&answer.data, mystem_reader)
+                if err != nil {
+                    answer.err = err
+                    break
+                }
+            } else {
+                for answer.data == "" {
+                    _, err = readStringFromPipe(&answer.data, mystem_reader)
+                    if err != nil {
+                        answer.err = err
+                        break
+                    }
+                }
+            }
             data.channel <- answer
-            time.Sleep(time.Millisecond * 100)
+            answer.data = ""
+            answer.err = nil
         }
     }
-    return 0
 }
 
 func checkInput(req *http.Request, words *[]string, ) (code int) {
@@ -197,11 +259,14 @@ func processWords(resp http.ResponseWriter, req *http.Request) {
     status_code := checkInput(req, &words)
     var words_count int = len(words)
     resp.Header().Set("Content-Type", HEADER_CONTENT_TYPES[config.format])
+    //resp.Header().Set("Content-Type", "text/plain;charset=utf-8")
     if words_count > 0 {
+        var err error
         var local_channel chan Answer = make(chan Answer, words_count)
         data.channel = local_channel
         var start int = 0
         for _, word := range words {
+            err = nil
             if reg_filter.MatchString(word) {
                 data.word = word
                 for_process <- data
@@ -209,7 +274,7 @@ func processWords(resp http.ResponseWriter, req *http.Request) {
                 start++
                 switch config.format {
                     case "json": {
-                        tmp_answer = fmt.Sprintf(`{"analysis":[], "text":"%v"},`, word)
+                        tmp_answer = fmt.Sprintf(`{"analysis":[], "text":"%v"}`, word)
                     }
                     case "xml": {
                         tmp_answer = "<w>" + word + "</w>"
@@ -223,23 +288,30 @@ func processWords(resp http.ResponseWriter, req *http.Request) {
         }
         for i := start; i < words_count; i++ {
             answer = <- local_channel
-            fmt.Println(answer.data)
+            if answer.err != nil {
+                err = answer.err
+            }
             answers = append(answers, answer.data)
         }
-        switch config.format {
-            case "json": {
-                request_answer = "[" + strings.Join(answers, ",") + "]"
+        if err == nil {
+            switch config.format {
+                case "json": {
+                    request_answer = "[" + strings.Join(answers, ",") + "]"
+                }
+                case "xml": {
+                    request_answer = `<?xml version="1.0" encoding="utf-8"?><html><body><se>` + strings.Join(answers, "\n") + "</se></body></html>"
+                }
+                case "text": {
+                    request_answer = strings.Join(answers, "\n")
+                }
             }
-            case "xml": {
-                request_answer = `<?xml version="1.0" encoding="utf-8"?><html><body><se>` + strings.Join(answers, "\n") + "</se></body></html>"
-            }
-            case "text": {
-                request_answer = strings.Join(answers, "\n")
-            }
+        } else {
+            //request_answer = fmt.Sprintf(`{"status": %v, "reason": "%v"}`, status_code, http.StatusText(http.StatusInternalServerError)
+            resp.WriteHeader(http.StatusInternalServerError)
         }
         close(local_channel)
     } else {
-        request_answer = fmt.Sprintf(`{"status": %v, "reason": "%v"}`, status_code, http.StatusText(status_code))
+        //request_answer = fmt.Sprintf(`{"status": %v, "reason": "%v"}`, status_code, http.StatusText(status_code))
         resp.WriteHeader(status_code)
     }
     resp.Write([]byte(request_answer))
