@@ -18,6 +18,7 @@ type Config struct {
     Port int
     Reg_filter string
     Mystem_path string
+    Mystem_options []string
     Mystem_workers int
     Channel_buffer int
     Max_word_length int
@@ -34,6 +35,13 @@ type Data struct {
     channel chan Answer
 }
 
+type Option struct {
+    deny bool
+    important bool
+    value string
+    values []string
+}
+
 var for_process chan Data
 var reg_filter *regexp.Regexp
 var config Config
@@ -41,6 +49,55 @@ var config Config
 func makePanic(msg string) {
     log.Fatal(msg)
     panic(msg)
+}
+
+func processMystemOptions(in_opts []string) (out_opts []string, err error) {
+    var options map map[string][string]
+    options_list := map[string]Option{
+        "-n": Option{false, true, nil, nil},
+        "-c": Option{false, false, nil, nil},
+        "-w": Option{false, false, nil, nil},
+        "-l": Option{false, false, nil, nil},
+        "-i": Option{false, false, nil, nil},
+        "-g": Option{false, false, nil, nil},
+        "-s": Option{false, false, nil, nil},
+        "-e": Option{true, false, "utf-8", []string{"cp866", "cp1251", "koi8-r", "utf-8"}},
+        "-d": Option{false, false, nil, nil},
+        "--eng-gr": Option{false, false, nil, nil},
+        "--filter-gram": Option{false, false, nil, nil},
+        "--fixlist": Option{false, false, nil, nil},
+        "--format": Option{false, true, "json", []string{"json", "text", "xml"}},
+        "--generate-all": Option{false, false, nil, nil},
+        "--weight": Option{false, false, nil, nil},
+    }
+    var opts_arr [2]string = [2]string{nil, nil}
+    var val Option
+    var exists bool = false
+    var approve bool = false
+    for opt := range in_opts {
+        opt = string.TrimSpace(opt)
+        if strings.Index(opt, " ") == -1 {
+            opts_arr[0] = opt
+        } else {
+            opts_arr = strings.Split(opt, ' ')
+        }
+        val, exists = options_list[opt]
+        if exists && (!val["deny"]) {
+            if opt_arr[1] == nil {
+                approve = true
+            } else {
+                
+            }            
+            if approve {
+                out_opts = append(out_ops, opt_arr...)
+            }
+        } else {
+            log.Printf("Mystem option '%v' ignored (wrong or unnecessary)")
+        }
+        approve = false
+        opt_arr = [2]string{nil, nil}
+    }
+    return out_opts, err
 }
 
 func loadConfig() (cfg Config, err error) {
@@ -56,6 +113,10 @@ func loadConfig() (cfg Config, err error) {
         _, err = file.Read(raw_json)
         if err == nil {
             err = json.Unmarshal(raw_json, &cfg)
+            fmt.Println(cfg.Mystem_options, err)
+            if err == nil {
+                cfg.Mystem_options, err = processMystemOptions(cfg.Mystem_options)
+            }
         }
     }
     return cfg, err
@@ -64,7 +125,7 @@ func loadConfig() (cfg Config, err error) {
 func workerMystem(for_process chan Data, mystem_path string) int {
     //name := rand.Int()
     //log.Print("Mystem started ", name)
-    mystem := exec.Command(mystem_path, "-n", "--format", "json")
+    mystem := exec.Command(mystem_path, config.Mystem_options...)
     mystem_writer, err_w := mystem.StdinPipe()
     mystem_reader, err_r := mystem.StdoutPipe()
     err := mystem.Start()
@@ -82,12 +143,12 @@ func workerMystem(for_process chan Data, mystem_path string) int {
             data = <- for_process
             n, err = mystem_writer.Write([]byte(fmt.Sprintf("%v\n", data.word)))
             if err != nil {
-                log.Panic(fmt.Sprintf("Can't send word to mystem: %v", err))
+                log.Panicf("Can't send word to mystem: %v", err)
             }
             buf = make([]byte, 1000)
             n, err = mystem_reader.Read(buf)
             if err != nil {
-                log.Panic(fmt.Sprintf("Can't read answer from mystem: %v", err))
+                log.Panicf("Can't read answer from mystem: %v", err)
             }
             answer.data = strings.TrimSpace(string(buf[:n]))
             answer.err = err
@@ -150,6 +211,7 @@ func processWords(resp http.ResponseWriter, req *http.Request) {
             request_answer += answer.data
         }
         request_answer += "]"
+        close(local_channel)
     } else {
         request_answer = fmt.Sprintf(`{"status": %v, "reason": "%v"}`, status_code, http.StatusText(status_code))
         resp.WriteHeader(status_code)
@@ -182,7 +244,7 @@ func main() {
             go workerMystem(for_process, config.Mystem_path)
         }
         http.HandleFunc("/", processWords)
-        log.Print(fmt.Sprintf("Server start on: %v:%v", config.Host, config.Port))
+        log.Printf("Server start on: %v:%v", config.Host, config.Port)
         err = http.ListenAndServe(fmt.Sprintf("%v:%v", config.Host, config.Port), nil)
         if err != nil {
             makePanic(fmt.Sprintf("Can't start http server: %v", err))
