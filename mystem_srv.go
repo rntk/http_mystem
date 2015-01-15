@@ -13,6 +13,14 @@ import (
     "regexp"
 )
 
+var HEADER_CONTENT_TYPES map[string]string = map[string]string{
+    "json": "javascript/json;charset=utf-8",
+    "text": "text/plain;charset=utf-8",
+    "xml": "text/xml;charset=utf-8",
+}
+
+const DEFAULT_FORMAT string = "text"
+
 type Config struct {
     Host string
     Port int
@@ -23,6 +31,7 @@ type Config struct {
     Channel_buffer int
     Max_word_length int
     Max_words int
+    format string
 }
 
 type Answer struct {
@@ -35,13 +44,6 @@ type Data struct {
     channel chan Answer
 }
 
-type Option struct {
-    deny bool
-    important bool
-    value string
-    values []string
-}
-
 var for_process chan Data
 var reg_filter *regexp.Regexp
 var config Config
@@ -51,53 +53,46 @@ func makePanic(msg string) {
     panic(msg)
 }
 
-func processMystemOptions(in_opts []string) (out_opts []string, err error) {
-    var options map map[string][string]
-    options_list := map[string]Option{
-        "-n": Option{false, true, nil, nil},
-        "-c": Option{false, false, nil, nil},
-        "-w": Option{false, false, nil, nil},
-        "-l": Option{false, false, nil, nil},
-        "-i": Option{false, false, nil, nil},
-        "-g": Option{false, false, nil, nil},
-        "-s": Option{false, false, nil, nil},
-        "-e": Option{true, false, "utf-8", []string{"cp866", "cp1251", "koi8-r", "utf-8"}},
-        "-d": Option{false, false, nil, nil},
-        "--eng-gr": Option{false, false, nil, nil},
-        "--filter-gram": Option{false, false, nil, nil},
-        "--fixlist": Option{false, false, nil, nil},
-        "--format": Option{false, true, "json", []string{"json", "text", "xml"}},
-        "--generate-all": Option{false, false, nil, nil},
-        "--weight": Option{false, false, nil, nil},
-    }
-    var opts_arr [2]string = [2]string{nil, nil}
-    var val Option
+func processMystemOptions(in_opts []string) (out_opts []string, format string, err error) {
+    var opts_arr []string
+    var approved bool = false
     var exists bool = false
-    var approve bool = false
-    for opt := range in_opts {
-        opt = string.TrimSpace(opt)
+    for _, opt := range in_opts {
+        opt = strings.TrimSpace(opt)
         if strings.Index(opt, " ") == -1 {
+            opts_arr = make([]string, 1)
             opts_arr[0] = opt
-        } else {
-            opts_arr = strings.Split(opt, ' ')
-        }
-        val, exists = options_list[opt]
-        if exists && (!val["deny"]) {
-            if opt_arr[1] == nil {
-                approve = true
+            if opt == "-e" {
+                approved = false
             } else {
-                
-            }            
-            if approve {
-                out_opts = append(out_ops, opt_arr...)
+                approved = true
             }
         } else {
-            log.Printf("Mystem option '%v' ignored (wrong or unnecessary)")
+            opts_arr = make([]string, 2)
+            opts_arr = strings.Split(opt, " ")
+            if opts_arr[0] == "--format" {
+                _, exists = HEADER_CONTENT_TYPES[opts_arr[1]]
+                if exists {
+                    format = opts_arr[1]
+                } else {
+                    format = DEFAULT_FORMAT
+                    log.Printf("Mystem option '%v' was replaced by default value. Because contain error")
+                }
+                approved = true
+            } else if opts_arr[0] != "-e"{
+                approved = true
+            }
         }
-        approve = false
-        opt_arr = [2]string{nil, nil}
+        if approved {
+            out_opts = append(out_opts, opts_arr...)
+        } else {
+            log.Printf("Mystem option '%v' was ignored or replaced by default value. Because wrong or unnecessary", opt)
+        }
     }
-    return out_opts, err
+    if format == "" {
+        format = DEFAULT_FORMAT
+    }
+    return out_opts, format, err
 }
 
 func loadConfig() (cfg Config, err error) {
@@ -113,9 +108,8 @@ func loadConfig() (cfg Config, err error) {
         _, err = file.Read(raw_json)
         if err == nil {
             err = json.Unmarshal(raw_json, &cfg)
-            fmt.Println(cfg.Mystem_options, err)
             if err == nil {
-                cfg.Mystem_options, err = processMystemOptions(cfg.Mystem_options)
+                cfg.Mystem_options, cfg.format, err = processMystemOptions(cfg.Mystem_options)
             }
         }
     }
@@ -139,6 +133,17 @@ func workerMystem(for_process chan Data, mystem_path string) int {
         var buf []byte
         var n int
         var answer Answer
+        if config.format == "xml" {
+            n, err = mystem_writer.Write([]byte("test"))
+            if err != nil {
+                makePanic(fmt.Sprintf("Can't send word to mystem: %v", err))
+            }
+            buf = make([]byte, 1000)
+            n, err = mystem_reader.Read(buf)
+            if err != nil {
+                makePanic(fmt.Sprintf("Can't send word to mystem: %v", err))
+            }
+        }
         for {
             data = <- for_process
             n, err = mystem_writer.Write([]byte(fmt.Sprintf("%v\n", data.word)))
@@ -160,7 +165,7 @@ func workerMystem(for_process chan Data, mystem_path string) int {
     return 0
 }
 
-func checkInput(req *http.Request) (words []string, code int) {
+func checkInput(req *http.Request, words *[]string, ) (code int) {
     var words_count int = len(req.Form["words[]"])
     if words_count == 0 {
         code = http.StatusNotAcceptable
@@ -174,23 +179,25 @@ func checkInput(req *http.Request) (words []string, code int) {
                 w = word[:int(config.Max_word_length)]
             }
             if w != "" {
-                words = append(words, w)
+                *words = append(*words, w)
             }
         }
     }
-    return words, code
+    return code
 }
 
 func processWords(resp http.ResponseWriter, req *http.Request) {
     var data Data
     var answer Answer
+    var answers []string
     var request_answer string = ""
     req.ParseForm()
-    words, status_code := checkInput(req)
+    var words []string
+    var tmp_answer string = ""
+    status_code := checkInput(req, &words)
     var words_count int = len(words)
-    resp.Header().Set("Content-Type", "application/json;charset=utf-8")
+    resp.Header().Set("Content-Type", HEADER_CONTENT_TYPES[config.format])
     if words_count > 0 {
-        request_answer = "["
         var local_channel chan Answer = make(chan Answer, words_count)
         data.channel = local_channel
         var start int = 0
@@ -200,17 +207,36 @@ func processWords(resp http.ResponseWriter, req *http.Request) {
                 for_process <- data
             } else {
                 start++
-                request_answer += fmt.Sprintf(`{"analysis":[], "text":"%v"},`, word)
+                switch config.format {
+                    case "json": {
+                        tmp_answer = fmt.Sprintf(`{"analysis":[], "text":"%v"},`, word)
+                    }
+                    case "xml": {
+                        tmp_answer = "<w>" + word + "</w>"
+                    }
+                    case "text": {
+                        tmp_answer = word
+                    }
+                }
+                answers = append(answers, tmp_answer)
             }
         }
         for i := start; i < words_count; i++ {
             answer = <- local_channel
-            if (i + 1) < words_count {
-                answer.data += ","
-            }
-            request_answer += answer.data
+            fmt.Println(answer.data)
+            answers = append(answers, answer.data)
         }
-        request_answer += "]"
+        switch config.format {
+            case "json": {
+                request_answer = "[" + strings.Join(answers, ",") + "]"
+            }
+            case "xml": {
+                request_answer = `<?xml version="1.0" encoding="utf-8"?><html><body><se>` + strings.Join(answers, "\n") + "</se></body></html>"
+            }
+            case "text": {
+                request_answer = strings.Join(answers, "\n")
+            }
+        }
         close(local_channel)
     } else {
         request_answer = fmt.Sprintf(`{"status": %v, "reason": "%v"}`, status_code, http.StatusText(status_code))
