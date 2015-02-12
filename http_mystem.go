@@ -20,6 +20,11 @@ var HEADER_CONTENT_TYPES map[string]string = map[string]string{
     "xml": "text/xml;charset=utf-8",
 }
 
+var IGNORE_OPTIONS map[string]bool = map[string]bool{
+    "-e": true,
+    "-c": true,
+}
+
 const DEFAULT_FORMAT string = "text"
 
 type Config struct {
@@ -29,11 +34,11 @@ type Config struct {
     Mystem_path string
     Mystem_options []string
     Mystem_workers int
+    Mystem_answer_size int
     Channel_buffer int
     Max_word_length int
     Max_words int
     format string
-    max_bytes int
 }
 
 type Answer struct {
@@ -63,10 +68,13 @@ func processMystemOptions(in_opts []string) (out_opts []string, format string, e
     for _, opt := range in_opts {
         approved = false
         opt = strings.TrimSpace(opt)
+        opt = strings.ToLower(opt)
         if strings.Index(opt, " ") == -1 {
             opts_arr = make([]string, 1)
             opts_arr[0] = opt
-            approved = true
+            if !bool(IGNORE_OPTIONS[opt]) {
+                approved = true
+            }
             if opt == "-n" {
                 n_exists = true
             }
@@ -79,10 +87,11 @@ func processMystemOptions(in_opts []string) (out_opts []string, format string, e
                     format = opts_arr[1]
                 } else {
                     format = DEFAULT_FORMAT
-                    log.Printf("Mystem option '%v' was replaced by default value. Because contain error")
+                    opts_arr[1] = format
+                    log.Printf("Mystem option '%v' was replaced by default value. Because contain error", opt)
                 }
                 approved = true
-            } else if opts_arr[0] != "-e"{
+            } else if !bool(IGNORE_OPTIONS[opts_arr[0]]) {
                 approved = true
             }
         }
@@ -117,7 +126,7 @@ func loadConfig() (cfg Config, err error) {
             err = json.Unmarshal(raw_json, &cfg)
             if err == nil {
                 cfg.Mystem_options, cfg.format, err = processMystemOptions(cfg.Mystem_options)
-                cfg.max_bytes = cfg.Max_word_length * 2
+                //cfg.Mystem_answer_size = cfg.Max_word_length * 500
             }
         }
     }
@@ -145,7 +154,7 @@ func readStringFromPipe(for_read *string, pipe io.ReadCloser) (n int, err error)
             log.Fatalf("Recover say: %v", result)
         }
     }()
-    buf := make([]byte, config.max_bytes)
+    buf := make([]byte, config.Mystem_answer_size)
     n, err = pipe.Read(buf)
     if err == nil {
         *for_read = strings.TrimSpace(string(buf[:n]))
