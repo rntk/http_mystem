@@ -23,6 +23,7 @@ var HEADER_CONTENT_TYPES map[string]string = map[string]string{
 var IGNORE_OPTIONS map[string]bool = map[string]bool{
     "-e": true,
     "-c": true,
+    "-d": true,
 }
 
 const DEFAULT_FORMAT string = "text"
@@ -39,6 +40,7 @@ type Config struct {
     Max_word_length int
     Max_words int
     format string
+    is_d bool
 }
 
 type Answer struct {
@@ -75,7 +77,7 @@ func processMystemOptions(in_opts []string) (out_opts []string, format string, e
             if !bool(IGNORE_OPTIONS[opt]) {
                 approved = true
             }
-            if opt == "-n" {
+            if (!n_exists) && (opt == "-n") {
                 n_exists = true
             }
         } else {
