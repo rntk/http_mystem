@@ -8,6 +8,7 @@
         "--format json"
     ],
     "mystem_workers": 2,
+    "mystem_answer_size": 10000,
     "channel_buffer": 10,
     "max_word_length": 50,
     "max_words": 100
