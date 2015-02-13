@@ -114,7 +114,7 @@ func processMystemOptions(in_opts []string) (out_opts []string, format string, e
 }
 
 func loadConfig() (cfg Config, err error) {
-    var f_name string = "conf.json"
+    var f_name string = "http_mystem.json"
     if (len(os.Args) > 1) {
         f_name = os.Args[1]
     }
