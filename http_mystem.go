@@ -12,6 +12,7 @@ import (
     "strings"
     //"math/rand"
     "regexp"
+    "runtime"
 )
 
 var HEADER_CONTENT_TYPES map[string]string = map[string]string{
@@ -349,6 +350,12 @@ func main() {
             for_process = make(chan Data)
         }
         log.Print("Config load successful")
+        if config.Mystem_workers == 0 {
+            var num_cpu int = runtime.NumCPU()
+            runtime.GOMAXPROCS(num_cpu)
+            config.Mystem_workers = num_cpu
+            log.Printf("Found %[1]v cores of CPU. Number of workers will be %[1]v", num_cpu)
+        }
         for i = 0; i < int(config.Mystem_workers); i++ {
             go workerMystem(for_process, config.Mystem_path)
         }
