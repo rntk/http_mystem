@@ -1,4 +1,4 @@
-package main
+package http_mystem
 
 import (
     "fmt"
@@ -63,7 +63,7 @@ func makePanic(msg string) {
     panic(msg)
 }
 
-func processMystemOptions(in_opts []string) (out_opts []string, format string, err error) {
+func ProcessMystemOptions(in_opts []string) (out_opts []string, format string, err error) {
     var opts_arr []string
     var approved bool = false
     var exists bool = false
@@ -128,7 +128,7 @@ func loadConfig() (cfg Config, err error) {
         if err == nil {
             err = json.Unmarshal(raw_json, &cfg)
             if err == nil {
-                cfg.Mystem_options, cfg.format, err = processMystemOptions(cfg.Mystem_options)
+                cfg.Mystem_options, cfg.format, err = ProcessMystemOptions(cfg.Mystem_options)
                 //cfg.Mystem_answer_size = cfg.Max_word_length * 500
             }
         }
