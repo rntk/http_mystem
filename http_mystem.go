@@ -58,11 +58,6 @@ var for_process chan Data
 var reg_filter *regexp.Regexp
 var config Config
 
-func makePanic(msg string) {
-    log.Fatal(msg)
-    panic(msg)
-}
-
 func ProcessMystemOptions(in_opts []string) (out_opts []string, format string, err error) {
     var opts_arr []string
     var approved bool = false
@@ -174,7 +169,7 @@ func readXMLTrash(number int, pipe io.ReadCloser) {
         for data == "" {
             _, err = readStringFromPipe(&data, pipe)
             if err != nil {
-                makePanic(fmt.Sprintf("Can't start: %v", err))
+                log.Fatalf("Can't start: %v", err)
             }
         }
         data = ""
@@ -189,10 +184,10 @@ func workerMystem(for_process chan Data, mystem_path string) {
     mystem_reader, err_r := mystem.StdoutPipe()
     err := mystem.Start()
     if (err_w != nil) || (err_r != nil) {
-        makePanic(fmt.Sprintf("Can't start: \n%v\n%v", err_w, err_r))
+        log.Fatalf("Can't start: \n%v\n%v", err_w, err_r)
     }
     if err != nil {
-        makePanic(fmt.Sprintf("Can't start: %v", err))
+        log.Fatalf("Can't start: %v", err)
     } else {
         var data Data
         var answer Answer
@@ -333,15 +328,15 @@ func main() {
     var err error = nil
     config, err = loadConfig()
     if err != nil {
-        makePanic(fmt.Sprintf("Can't load config: %v", err))
+        log.Fatalf("Can't load config: %v", err)
     } else {
         reg_filter, err = regexp.Compile(config.Reg_filter)
         if err != nil {
-            makePanic(fmt.Sprintf("Can`t compile regular expression: %v", err))
+            log.Fatalf("Can`t compile regular expression: %v", err)
         }
         _, err = os.Open(config.Mystem_path)
         if  err != nil {
-            makePanic(fmt.Sprintf("Can't find mystem: %v", err))
+            log.Fatal("Can't find mystem: %v", err)
         }
         var i int
         if config.Channel_buffer > 0 {
@@ -363,7 +358,7 @@ func main() {
         log.Printf("Server start on: %v:%v", config.Host, config.Port)
         err = http.ListenAndServe(fmt.Sprintf("%v:%v", config.Host, config.Port), nil)
         if err != nil {
-            makePanic(fmt.Sprintf("Can't start http server: %v", err))
+            log.Fatalf("Can't start http server: %v", err)
         }
     }
 }
